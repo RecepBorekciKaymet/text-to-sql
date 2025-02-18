@@ -1,3 +1,22 @@
+"""
+Module for converting natural language queries (NLQ) into SQL queries  
+and executing SQL queries against a SQLite database.
+
+This module provides:
+1. A function (`convert_nlp_to_sql`) that uses OpenAI's GPT model to generate SQL queries from NLQ input.
+2. A function (`execute_sql_query`) that executes SQL queries against a local SQLite database.
+
+Environment Variables:
+- OPENAI_API_KEY: The API key required to authenticate with OpenAI.
+
+Dependencies:
+- `openai`: For interacting with OpenAI's GPT model.
+- `sqlite3`: For executing SQL queries against a local database.
+- `python-dotenv`: For loading environment variables.
+
+Author: Recep Borekci
+Date:  18/02/2025  
+"""
 import os
 import sqlite3
 import logging
@@ -10,7 +29,7 @@ openai_api_key = os.getenv('OPENAI_API_KEY')
 openai = OpenAI(api_key=openai_api_key)
 MODEL = 'gpt-4o'
 
-system_message = (
+SYSTEM_MESSAGE = (
     "You are an assistant helping the user convert natural language queries into SQL queries. "
     "The user will provide a natural language query, and you will respond with the corresponding SQL query. "
     "Respond only with the SQL query and do not include any additional information. "
@@ -50,7 +69,7 @@ def convert_nlp_to_sql(query: str) -> str:
 
     try:
         messages = [
-            {"role": "system", "content": system_message},
+            {"role": "system", "content": SYSTEM_MESSAGE},
             {"role": "user", "content": "Here's the query you will convert to SQL: \n" + query},
         ]
 
