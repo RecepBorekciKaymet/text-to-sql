@@ -18,6 +18,7 @@ Author: Recep Borekci
 Date:  18/02/2025  
 """
 import os
+import json
 import sqlite3
 import logging
 from openai import OpenAI
@@ -143,16 +144,18 @@ def convert_nlp_to_sql(query: str) -> str:
         logging.error(f"Error during NLP to SQL conversion: {e}")
         raise
 
-def execute_sql_query(sql_query: str) -> dict[str, list[str]]:
+def execute_sql_query(query: str, structured: bool = False):
     """
-    Executes a SQL query against the database and returns the result in a structured format.
+    Executes a SQL query against the database and returns the result.
 
     Args:
-        sql_query (str): The SQL query to be executed.
-    
+        query (str): The SQL query to be executed.
+        structured (bool): If True, returns a dictionary with column names as keys.
+                           If False, returns a list of tuples (default).
+
     Returns:
-        dict: A dictionary containing column names as keys and rows as lists of values.
-    
+        dict | list: Dictionary with column names (if structured=True) or list of tuples.
+
     Raises:
         sqlite3.Error: If there's an error with the database query.
     """
@@ -160,25 +163,105 @@ def execute_sql_query(sql_query: str) -> dict[str, list[str]]:
         conn = sqlite3.connect("data.db")
         cursor = conn.cursor()
 
-        cursor.execute(sql_query)
+        cursor.execute(query)
 
-        # Fetch the column names
+        # Fetch column names
         columns = [description[0] for description in cursor.description]
 
-        # Fetch all the rows
+        # Fetch all rows
         rows = cursor.fetchall()
 
-        # Create a dictionary with column names as keys and corresponding values as lists
-        result = {column: [] for column in columns}
-
-        for row in rows:
-            for i, column in enumerate(columns):
-                result[column].append(str(row[i]))  # Ensure all values are strings
-
         conn.commit()
-        conn.close()
 
-        return result
+        if structured:
+            # Return as a dictionary {column_name: [values]}
+            result = {column: [] for column in columns}
+            for row in rows:
+                for i, column in enumerate(columns):
+                    result[column].append(str(row[i]))  # Ensure all values are strings
+            return result
+        else:
+            # Return as a list of tuples
+            return rows
+
     except sqlite3.Error as e:
         logging.error(f"Database error: {e}")
-        raise
+        return f"SQL Error: {str(e)}"
+
+    finally:
+        conn.close()
+
+def handle_tool_call(message):
+    """
+    Handles an incoming tool call message and executes the requested SQL query.
+
+    Args:
+        message (dict): The message containing the tool call details.
+
+    Returns:
+        dict: A structured response containing the query and its results.
+    """
+    tool_call = message.tool_calls[0]
+
+    if tool_call.function.name == "run_sql_query":
+        arguments = json.loads(tool_call.function.arguments)
+        query = arguments.get("query")
+        results = execute_sql_query(query)
+
+        # Ensure results are in a structured format
+        structured_response = {
+            "query": query,
+            "results": results  # This returns raw SQL results as-is
+        }
+        
+        return {
+            "role": "tool",
+            "content": json.dumps(structured_response, indent=2),
+            "tool_call_id": tool_call.id,
+        }
+        
+
+
+sql_function = {
+    "name": "run_sql_query",
+    "description": "Executes an SQL query and retrieves data from the database. Use this to fetch information when a user asks about data stored in SQL.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The SQL query to be executed",
+            },
+        },
+        "required": ["query"],
+    }
+}
+
+tools = [{"type": "function", "function": sql_function}]
+
+def generate_and_run_sql_query(text):
+    """
+    Converts a natural language query into an SQL query.  
+    If execution is requested, runs the SQL query and returns the results. Otherwise, only returns the generated SQL query.
+
+    Args:
+        text (str): The natural language query.
+
+    Returns:
+        str: 
+            - If execution is **not** requested: Returns the generated SQL query as a plain string.
+            - If execution **is** requested: Returns the query result in a Markdown-like format,  
+              prefixed with an introductory message such as "Here's the result of the query:".
+    """
+
+    messages = [{"role": "system", "content": SYSTEM_MESSAGE}, {"role": "user", "content": text}]
+    response = openai.chat.completions.create(model=MODEL, messages=messages, tools=tools)
+
+    if response.choices[0].finish_reason == "tool_calls":
+        message = response.choices[0].message
+        response = handle_tool_call(message)
+        messages.append(message)
+        messages.append(response)
+        response = openai.chat.completions.create(model=MODEL, messages=messages)
+
+    return response.choices[0].message.content

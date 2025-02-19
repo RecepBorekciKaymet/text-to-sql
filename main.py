@@ -13,7 +13,7 @@ Date: 18/02/2025
 import logging
 from fastapi import FastAPI, Body, HTTPException
 from pydantic import BaseModel
-from utils import convert_nlp_to_sql, execute_sql_query
+from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query
 
 class NLQRequest(BaseModel):
     """
@@ -34,6 +34,16 @@ class SQLRequest(BaseModel):
         query (str): The SQL query to execute.
     """
     query: str
+
+class CombinedRequest(BaseModel):
+    """
+    Represents a request containing a natural language query (NLQ)  
+    that needs to be converted into an SQL query and executed.
+
+    Attributes:
+        text (str): The natural language query input.
+    """
+    text: str
 
 app = FastAPI()
 
@@ -58,7 +68,7 @@ def generate_sql(request: NLQRequest =
     text = request.text
 
     if not text or len(text) > 1500:
-        raise HTTPException(status_code=400, 
+        raise HTTPException(status_code=400,
                             detail="Query cannot be empty" if not text else "Query is too long")
 
     sql_query = convert_nlp_to_sql(text)
@@ -86,6 +96,35 @@ def execute_sql(request: SQLRequest =
         raise HTTPException(status_code=400, 
                             detail="Query cannot be empty" if not query else "Query is too long")
 
-    query_result = execute_sql_query(query)
+    query_result = execute_sql_query(query, structured=True)
 
     return {"query_result": query_result}
+
+@app.post("/generate-and-run-sql")
+def generate_and_run_sql(request: CombinedRequest =
+                         Body(..., title="Combined_Request")):
+    """
+    Converts a natural language query (NLQ) into an SQL query.  
+    If execution is requested, runs the SQL query and returns the results. Otherwise, only returns the generated SQL query.
+
+    Args:
+        request (CombinedRequest): The request body containing the NLQ.
+
+    Returns:
+        str: 
+            - If execution is **not** requested: Returns the generated SQL query as a plain string.
+            - If execution **is** requested: Returns the query result in a Markdown-like format,  
+              prefixed with an introductory message such as "Here's the result of the query:".
+
+    Raises:
+        HTTPException: If the input text is empty or exceeds 1500 characters.
+    """
+    text = request.text
+
+    if not text or len(text) > 1500:
+        raise HTTPException(status_code=400,
+                            detail="Query cannot be empty" if not text else "Query is too long")
+
+    sql_query = generate_and_run_sql_query(text)
+
+    return {"sql_query": sql_query }
