@@ -11,9 +11,11 @@ Date: 18/02/2025
 """
 
 import logging
-from fastapi import FastAPI, Body, HTTPException
+from fastapi import FastAPI, Body
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query
+
 
 class NLQRequest(BaseModel):
     """
@@ -56,20 +58,21 @@ def generate_sql(request: NLQRequest =
     Converts a natural language query (NLQ) into an SQL query.
 
     Args:
-        request (NLQRequest): The request body containing the NLQ.
+        request (NLQRequest): The request body containing the NLQ. The `text` field of the request 
+                               should contain the natural language query to be converted into SQL.
 
     Returns:
-        dict: A dictionary with the generated SQL query.
+        dict: A dictionary with the generated SQL query under the key 'sql_query'.
 
     Raises:
-        HTTPException: If the input text is empty or exceeds 1500 characters.
+        HTTPException: If the input text is empty or exceeds 5000 characters, an error response is returned.
     """
 
     text = request.text
 
-    if not text or len(text) > 1500:
-        raise HTTPException(status_code=400,
-                            detail="Query cannot be empty" if not text else "Query is too long")
+    if not text or len(text) > 5000:
+        return JSONResponse(status_code=400, 
+                            content={"detail": "Query cannot be empty" if not text else "Query is too long"})
 
     sql_query = convert_nlp_to_sql(text)
 
@@ -82,19 +85,20 @@ def execute_sql(request: SQLRequest =
     Executes an SQL query and returns the result.
 
     Args:
-        request (SQLRequest): The request body containing the SQL query.
+        request (SQLRequest): The request body containing the SQL query. The `query` field of the request 
+                               should contain the SQL query to be executed.
 
     Returns:
-        dict: A dictionary containing the query result.
+        dict: A dictionary containing the query result under the key 'query_result'.
 
     Raises:
-        HTTPException: If the input SQL query is empty or exceeds 1500 characters.
+        HTTPException: If the input SQL query is empty or exceeds 5000 characters, an error response is returned.
     """
     query = request.query
 
-    if not query or len(query) > 1500:
-        raise HTTPException(status_code=400, 
-                            detail="Query cannot be empty" if not query else "Query is too long")
+    if not query or len(query) > 5000:
+        return JSONResponse(status_code=400,
+                            content={"detail": "Query cannot be empty" if not query else "Query is too long"})
 
     query_result = execute_sql_query(query, structured=True)
 
@@ -121,9 +125,9 @@ def generate_and_run_sql(request: CombinedRequest =
     """
     text = request.text
 
-    if not text or len(text) > 1500:
-        raise HTTPException(status_code=400,
-                            detail="Query cannot be empty" if not text else "Query is too long")
+    if not text or len(text) > 5000:
+        return JSONResponse(status_code=400, 
+                            content={"detail": "Query cannot be empty" if not text else "Query is too long"})
 
     sql_query = generate_and_run_sql_query(text)
 
