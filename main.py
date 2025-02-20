@@ -16,7 +16,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query
 
-
 class NLQRequest(BaseModel):
     """
     Represents a request containing a natural language query (NLQ)  
