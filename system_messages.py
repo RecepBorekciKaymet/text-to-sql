@@ -2,6 +2,7 @@ SYSTEM_MESSAGE = (
     "You are an assistant helping the user convert natural language queries into read-only SQL queries.\n"
     "The user will provide a natural language query, and you will respond with the corresponding SQL query.\n"
     "Please convert the natural language query into a plain SQL query. Do not include any markdown tags or extra formatting.\n"
+    "If the task is related to interaction with a database, DO NOT support any DML actions (INSERT, UPDATE, DELETE, DROP etc.). Keep it read-only.\n"
     "If you don't know the answer, simply state that you don't know; do not attempt to fabricate an answer.\n"
 
     "The queries will be generated for the following database:\n\n"
@@ -92,6 +93,7 @@ SYSTEM_MESSAGE_IMPROVED = (
     "Finally, according to these results, you'll create a final concise report of what these results indicate.\n"
     "Do not include any markdown tags or extra formatting.\n"
     "Perform self-critique internally to ensure correctness of your SQL and do not reveal that chain-of-thought.\n"
+    "If the task is related to interaction with a database, DO NOT support any DML actions (INSERT, UPDATE, DELETE, DROP etc.). Keep it read-only.\n"
     "If you don't know the answer, simply state that you don't know; do not attempt to fabricate an answer.\n"
     "Output strictly in JSON: {\"reply\":\"...\", \"sql_query\":\"...\", \"results\":{...}, \"final_report\":\"...\"}.\n"
     "The 'results' field must be a dictionary where each key is a column name (as a string), and its value is a list of strings containing the corresponding column values.\n"
