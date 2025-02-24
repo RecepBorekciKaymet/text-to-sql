@@ -54,7 +54,7 @@ class FullRequest(BaseModel):
         message (str): The natural language query input.
     """
     message: str
-
+      
 app = FastAPI()
 
 logging.basicConfig(level=logging.INFO)
@@ -140,7 +140,7 @@ def generate_and_run_sql(request: CombinedRequest =
     sql_query = generate_and_run_sql_query(text)
 
     return {"sql_query": sql_query }
-
+ 
 @app.post("/execute-and-report")
 def execute_and_report(request: FullRequest =
                          Body(..., title="Combined_Request")):

@@ -182,7 +182,6 @@ def generate_and_run_sql_query(text):
 
     return response.choices[0].message.content
 
-
 def execute_and_report_helper(message) -> str:
     """
     Processes a user's input message that may require SQL execution. This function generates 
@@ -227,4 +226,3 @@ def execute_and_report_helper(message) -> str:
     # If no SQL tool call, return the original LLM response wrapped in a dictionary
     response_content = response.choices[0].message.content
     return json.loads(response_content)
-
