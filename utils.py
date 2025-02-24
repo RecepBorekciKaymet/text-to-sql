@@ -223,7 +223,8 @@ def execute_and_report_helper(message) -> str:
         # Parse the response content as JSON
         final_content = final_response.choices[0].message.content
         return json.loads(final_content)  # Return as a parsed dictionary
-
-    # If no SQL tool call, return the original LLM response
-    return response.choices[0].message.content
+    
+    # If no SQL tool call, return the original LLM response wrapped in a dictionary
+    response_content = response.choices[0].message.content
+    return json.loads(response_content)
 
