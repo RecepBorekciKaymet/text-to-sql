@@ -1,12 +1,10 @@
 """
-FastAPI application for converting natural language queries (NLQ) into SQL queries  
-and executing SQL queries against a database.
+FastAPI application for converting natural language queries (NLQ) into SQL queries 
+and executing SQL queries against a database. This module defines the API endpoints 
+for generating SQL queries from natural language input and executing them against 
+a database, with the option to return structured reports.
 
-This module defines the API endpoints for:
-1. Generating SQL queries from natural language input.
-2. Executing SQL queries and returning the results.
-
-Author: Recep Borekci
+Author: Recep Borekci  
 Date: 18/02/2025
 """
 
@@ -14,7 +12,7 @@ import logging
 from fastapi import FastAPI, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query
+from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query, execute_and_report_helper
 
 class NLQRequest(BaseModel):
     """
@@ -46,6 +44,17 @@ class CombinedRequest(BaseModel):
     """
     text: str
 
+class FullRequest(BaseModel):
+    """
+    Represents a request containing a natural language query (NLQ)  
+    that needs to be converted into an SQL query and executed,  
+    and return the results in a structured format.
+
+    Attributes:
+        message (str): The natural language query input.
+    """
+    message: str
+      
 app = FastAPI()
 
 logging.basicConfig(level=logging.INFO)
@@ -131,3 +140,32 @@ def generate_and_run_sql(request: CombinedRequest =
     sql_query = generate_and_run_sql_query(text)
 
     return {"sql_query": sql_query }
+ 
+@app.post("/execute-and-report")
+def execute_and_report(request: FullRequest =
+                         Body(..., title="Combined_Request")):
+    """
+    Processes a user's natural language query by converting it into an SQL query,  
+    executing the query, and returning the results in a structured format.  
+    If the query involves a tool call (e.g., SQL execution), the tool will be invoked and the results will be included in the response.
+
+    Args:
+        request (FullRequest): The request body containing the user's message with the natural language query.
+
+    Returns:
+        dict: A structured JSON response containing the results of the SQL execution or failure message,  
+              depending on the query's nature and execution success.
+
+    Raises:
+        HTTPException: If the input message is empty or exceeds 5000 characters.
+    """
+
+    message = request.message
+
+    if not message or len(message) > 5000:
+        return JSONResponse(status_code=400, 
+                            content={"detail": "Query cannot be empty" if not message else "Query is too long"})
+
+    results = execute_and_report_helper(message)
+
+    return results
