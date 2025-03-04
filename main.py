@@ -12,7 +12,7 @@ import logging
 from fastapi import FastAPI, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query, execute_and_report_helper
+from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query, execute_and_report_helper, execute_and_report_with_db_helper
 
 class NLQRequest(BaseModel):
     """
@@ -53,6 +53,10 @@ class FullRequest(BaseModel):
     Attributes:
         message (str): The natural language query input.
     """
+    message: str
+
+class RequestForDatabase(BaseModel):
+    session_id: str
     message: str
       
 app = FastAPI()
@@ -167,5 +171,36 @@ def execute_and_report(request: FullRequest =
                             content={"detail": "Query cannot be empty" if not message else "Query is too long"})
 
     results = execute_and_report_helper(message)
+
+    return results
+
+@app.post("/execute-and-report-with-db")
+def execute_and_report_with_db(request: RequestForDatabase =
+                         Body(..., title="Combined_Request")):
+    """
+    Processes a user's natural language query by converting it into an SQL query,  
+    executing the query, and returning the results in a structured format.  
+    If the query involves a tool call (e.g., SQL execution), the tool will be invoked and the results will be included in the response.
+
+    Args:
+        request (FullRequest): The request body containing the user's message with the natural language query.
+
+    Returns:
+        dict: A structured JSON response containing the results of the SQL execution or failure message,  
+              depending on the query's nature and execution success.
+
+    Raises:
+        HTTPException: If the input message is empty or exceeds 5000 characters.
+    """
+
+    session_id = request.session_id
+    message = request.message
+
+     
+    if not message or len(message) > 5000:
+        return JSONResponse(status_code=400, 
+                            content={"detail": "Query cannot be empty" if not message else "Query is too long"})
+
+    results = execute_and_report_with_db_helper(message, session_id)
 
     return results
