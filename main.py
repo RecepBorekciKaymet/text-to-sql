@@ -8,10 +8,14 @@ Author: Recep Borekci
 Date: 18/02/2025
 """
 
+from typing import Any, Dict
+
 import logging
 from fastapi import FastAPI, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+import db_utils
 from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query, execute_and_report_helper, execute_and_report_with_db_helper
 
 class NLQRequest(BaseModel):
@@ -204,3 +208,30 @@ def execute_and_report_with_db(request: RequestForDatabase =
     results = execute_and_report_with_db_helper(message, session_id)
 
     return results
+
+@app.get("/chat_history/{session_id}")
+def get_chat_history(session_id: str) -> Dict[str, Any]:
+    """Retrieve the full conversation history for a given session ID.
+
+    The returned history filters out system messages for frontend display,
+    showing only user and assistant messages.
+
+    Args:
+        session_id (str): The session identifier.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing the session ID and a list of messages.
+    """
+    conversation = db_utils.get_conversation_with_timestamp(session_id) or []
+
+    if not conversation:
+        print(f"[WARN] No chat history found for session_id: {session_id}")
+
+    user_assistant_messages = [
+        msg for msg in conversation if msg["role"] in ["user", "assistant"]
+    ]
+
+    return {
+        "sessionId": session_id,
+        "messages": user_assistant_messages,
+    }

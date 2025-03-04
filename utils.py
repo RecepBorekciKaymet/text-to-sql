@@ -255,6 +255,7 @@ def execute_and_report_with_db_helper(message, session_id) -> str:
     # If this is a brand new session, insert the system prompt.
     if not conversation:
         db_utils.insert_message(session_id, "system", SYSTEM_MESSAGE_IMPROVED)
+        conversation = []
         conversation.append({"role": "system", "content": SYSTEM_MESSAGE_IMPROVED})
 
     messages = conversation + [{"role": "user", "content": message}]
@@ -270,12 +271,12 @@ def execute_and_report_with_db_helper(message, session_id) -> str:
     if response.choices[0].finish_reason == "tool_calls":  # If the LLM wants to call a tool (SQL query execution)
         tool_message = response.choices[0].message
 
-        db_utils.insert_message(session_id, "assistant", tool_message)  # Store LLM's tool call
+        db_utils.insert_message(session_id, "assistant", json.loads(tool_message))  # Store LLM's tool call
 
         structured_tool_response = handle_tool_call(tool_message)  # Run SQL query
         
         # Insert tool execution result
-        db_utils.insert_message(session_id, "tool", structured_tool_response)
+        db_utils.insert_message(session_id, "tool", json.loads(structured_tool_response))
 
         # Step 2: Send results back to the LLM for final reporting
         messages.append(tool_message)  # Add LLM's SQL generation
