@@ -20,6 +20,7 @@ Author: Recep Borekci
 Date:  18/02/2025  
 """
 import os
+import re
 import json
 import sqlite3
 import logging
@@ -28,6 +29,17 @@ from dotenv import load_dotenv
 from system_messages import SYSTEM_MESSAGE, SYSTEM_MESSAGE_IMPROVED
 
 import db_utils
+
+# Configure the logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("app.log"),  # Logs to a file
+        logging.StreamHandler()  # Also logs to the console
+    ]
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -81,6 +93,8 @@ def execute_sql_query(query: str, structured: bool = False):
         conn = sqlite3.connect("data.db")
         cursor = conn.cursor()
 
+        logger.info(f"Executing SQL query: {query}")  # ✅ Log query execution
+
         cursor.execute(query)
 
         # Fetch column names
@@ -97,17 +111,40 @@ def execute_sql_query(query: str, structured: bool = False):
             for row in rows:
                 for i, column in enumerate(columns):
                     result[column].append(str(row[i]))  # Ensure all values are strings
+            logger.info(f"Query executed successfully. {len(rows)} rows returned.")
             return result
         else:
+            logger.info(f"Query executed successfully. {len(rows)} rows returned.")
             # Return as a list of tuples
             return rows
 
     except sqlite3.Error as e:
-        logging.error(f"Database error: {e}")
+        logger.error(f"Database error: {e}")  # ✅ Log errors properly
         return f"SQL Error: {str(e)}"
 
     finally:
         conn.close()
+
+def is_read_only_query(query: str) -> bool:
+    """
+    Checks if the given SQL query is read-only.
+
+    Args:
+        query (str): The SQL query to validate.
+
+    Returns:
+        bool: True if the query is read-only, False otherwise.
+    """
+    # Convert to lowercase for case-insensitive checks
+    query = query.strip().lower()
+
+    # Reject queries that contain any DML operations (INSERT, UPDATE, DELETE, DROP, ALTER, etc.)
+    forbidden_keywords = ["insert", "update", "delete", "drop", "alter", "truncate"]
+    
+    # Use regex to find if any forbidden keyword is the first word (excluding comments)
+    pattern = r"^\s*(?:--.*\n)*\s*\b(" + "|".join(forbidden_keywords) + r")\b"
+
+    return not re.search(pattern, query)
 
 def handle_tool_call(message):
     """
@@ -124,6 +161,16 @@ def handle_tool_call(message):
     if tool_call.function.name == "run_sql_query":
         arguments = json.loads(tool_call.function.arguments)
         query = arguments.get("query")
+
+        # Check if the query is read-only
+        if not is_read_only_query(query):
+            logging.warning(f"Blocked non-read query: {query}")
+            return {
+                "role": "tool",
+                "content": json.dumps({"error": "Unauthorized operation: Only read-only queries are allowed."}),
+                "tool_call_id": tool_call.id,
+            }
+
         results = execute_sql_query(query)
 
         # Ensure results are in a structured format
@@ -201,6 +248,8 @@ def execute_and_report_helper(message) -> str:
 
     messages = [{"role": "system", "content": SYSTEM_MESSAGE_IMPROVED}, {"role": "user", "content": message}]
 
+    logger.info(f"Processing user message: {message}")
+
     # Step 1: Ask LLM to generate an SQL query if needed
     response = openai.chat.completions.create(
         model=MODEL,
@@ -208,6 +257,10 @@ def execute_and_report_helper(message) -> str:
         tools=tools,  # Let the LLM know it can use the SQL tool
         tool_choice="auto",  # Automatically decide when to call the tool
     )
+
+    if not response.choices or not response.choices[0].message.content:
+        logger.warning("LLM returned an empty response.")
+        return {"error": "LLM returned no response"}
 
     if response.choices[0].finish_reason == "tool_calls":  # If the LLM wants to call a tool (SQL query execution)
         tool_message = response.choices[0].message
@@ -226,9 +279,10 @@ def execute_and_report_helper(message) -> str:
         final_content = final_response.choices[0].message.content
         return json.loads(final_content)  # Return as a parsed dictionary
     
-    # If no SQL tool call, return the original LLM response wrapped in a dictionary
-    response_content = response.choices[0].message.content
-    return json.loads(response_content)
+    response_content = json.loads(response.choices[0].message.content)
+
+    logger.info("LLM successfully processed the message.")
+    return response_content
 
 def clean_response(response_dict):
     """Removes keys with None, empty strings, or empty dictionaries from a response."""
@@ -303,7 +357,7 @@ def execute_and_report_with_db_helper(message, session_id) -> dict:
             error_response = {"error": "LLM returned no final response"}
             db_utils.insert_message(session_id, "assistant", json.dumps(error_response))
             return error_response
-
+        
         final_content = json.loads(final_response.choices[0].message.content)
 
         # ✅ Clean response before returning

@@ -66,6 +66,22 @@ app = FastAPI()
 
 logging.basicConfig(level=logging.INFO)
 
+def validate_input(text: str, max_length: int = 5000) -> JSONResponse | None:
+    """
+    Validates input text for API requests.
+
+    Args:
+        text (str): The input text to validate.
+        max_length (int): Maximum allowed length of the text.
+
+    Returns:
+        JSONResponse | None: A JSON error response if invalid, otherwise None.
+    """
+    if not text or len(text) > max_length:
+        return JSONResponse(status_code=400, 
+                            content={"detail": "Query cannot be empty" if not text else f"Query is too long (max {max_length} chars)"})
+    return None
+
 @app.post("/generate-sql")
 def generate_sql(request: NLQRequest = 
                  Body(..., title="NLQ", description="Natural Language Query to generate SQL")):
@@ -85,9 +101,9 @@ def generate_sql(request: NLQRequest =
 
     text = request.text
 
-    if not text or len(text) > 5000:
-        return JSONResponse(status_code=400, 
-                            content={"detail": "Query cannot be empty" if not text else "Query is too long"})
+    validation_error = validate_input(text)
+    if validation_error:
+        return validation_error
 
     sql_query = convert_nlp_to_sql(text)
 
@@ -111,9 +127,9 @@ def execute_sql(request: SQLRequest =
     """
     query = request.query
 
-    if not query or len(query) > 5000:
-        return JSONResponse(status_code=400,
-                            content={"detail": "Query cannot be empty" if not query else "Query is too long"})
+    validation_error = validate_input(query)
+    if validation_error:
+        return validation_error
 
     query_result = execute_sql_query(query, structured=True)
 
@@ -140,9 +156,9 @@ def generate_and_run_sql(request: CombinedRequest =
     """
     text = request.text
 
-    if not text or len(text) > 5000:
-        return JSONResponse(status_code=400, 
-                            content={"detail": "Query cannot be empty" if not text else "Query is too long"})
+    validation_error = validate_input(text)
+    if validation_error:
+        return validation_error
 
     sql_query = generate_and_run_sql_query(text)
 
@@ -169,9 +185,9 @@ def execute_and_report(request: FullRequest =
 
     message = request.message
 
-    if not message or len(message) > 5000:
-        return JSONResponse(status_code=400, 
-                            content={"detail": "Query cannot be empty" if not message else "Query is too long"})
+    validation_error = validate_input(message)
+    if validation_error:
+        return validation_error
 
     results = execute_and_report_helper(message)
 
@@ -199,9 +215,9 @@ def execute_and_report_with_db(request: RequestForDatabase =
     message = request.message
 
      
-    if not message or len(message) > 5000:
-        return JSONResponse(status_code=400, 
-                            content={"detail": "Query cannot be empty" if not message else "Query is too long"})
+    validation_error = validate_input(message)
+    if validation_error:
+        return validation_error
 
     results = execute_and_report_with_db_helper(message, session_id)
 
