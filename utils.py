@@ -303,73 +303,86 @@ def execute_and_report_with_db_helper(message, session_id) -> dict:
         dict: The final response from the language model, possibly including SQL query results.
     """
 
+    logger.info(f"Session {session_id}: Received message -> {message}")
+
     # Initialize the database
     db_utils.init_db()
+    logger.info(f"Session {session_id}: Database initialized.")
 
     # Retrieve conversation history
     conversation = db_utils.get_conversation(session_id) or []
     
-    # If new session, insert system message
     if not conversation:
+        logger.info(f"Session {session_id}: No previous conversation found. Initializing session.")
         db_utils.insert_message(session_id, "system", SYSTEM_MESSAGE_IMPROVED)
         conversation.append({"role": "system", "content": SYSTEM_MESSAGE_IMPROVED})
 
     # Add user message to conversation
     messages = conversation + [{"role": "user", "content": message}]
     db_utils.insert_message(session_id, "user", message)
+    logger.info(f"Session {session_id}: User message stored in DB.")
 
     # Step 1: Ask LLM to generate an SQL query if needed
-    response = openai.chat.completions.create(
-        model=MODEL,
-        messages=messages,
-        tools=tools,
-        tool_choice="auto",  # Automatically decide when to call the tool
-    )
+    try:
+        response = openai.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+        )
+    except Exception as e:
+        logger.error(f"Session {session_id}: Error calling LLM - {e}")
+        return {"error": "LLM request failed."}
 
-    # Parse response content
-    # Null check before parsing response
     if not response.choices or not response.choices[0].message.content:
+        logger.warning(f"Session {session_id}: LLM returned no response.")
         error_response = {"error": "LLM returned no response"}
         db_utils.insert_message(session_id, "assistant", json.dumps(error_response))
         return error_response
-    
-    # Parse response content
+
     response_content = json.loads(response.choices[0].message.content)
 
     # Step 2: Handle tool calls (SQL queries)
     if response.choices[0].finish_reason == "tool_calls":
-        tool_message = response.choices[0].message
+        logger.info(f"Session {session_id}: LLM requested a tool call (SQL execution).")
 
+        tool_message = response.choices[0].message
         db_utils.insert_message(session_id, "assistant", json.dumps(tool_message))
 
         structured_tool_response = handle_tool_call(tool_message)  # Execute SQL query
-        
+
+        if "error" in structured_tool_response:
+            logger.error(f"Session {session_id}: Error executing SQL query - {structured_tool_response['error']}")
+
         # Insert tool execution result
         db_utils.insert_message(session_id, "tool", json.dumps(structured_tool_response))
 
         # Step 3: Send SQL results back to LLM for final response
         messages.extend([tool_message, structured_tool_response])
 
-        final_response = openai.chat.completions.create(model=MODEL, messages=messages)
+        try:
+            final_response = openai.chat.completions.create(model=MODEL, messages=messages)
+        except Exception as e:
+            logger.error(f"Session {session_id}: Error generating final report from LLM - {e}")
+            return {"error": "LLM failed to generate final report."}
 
-        # Null check before parsing final response
         if not final_response.choices or not final_response.choices[0].message.content:
+            logger.warning(f"Session {session_id}: LLM returned no final response.")
             error_response = {"error": "LLM returned no final response"}
             db_utils.insert_message(session_id, "assistant", json.dumps(error_response))
             return error_response
-        
-        final_content = json.loads(final_response.choices[0].message.content)
 
-        # ✅ Clean response before returning
+        final_content = json.loads(final_response.choices[0].message.content)
         final_content = clean_response(final_content)
 
         db_utils.insert_message(session_id, "assistant", json.dumps(final_content))
+        logger.info(f"Session {session_id}: Final response stored in DB.")
 
-        return final_content  # Already a dictionary
+        return final_content
 
     # ✅ Clean response before returning
     response_content = clean_response(response_content)
-
     db_utils.insert_message(session_id, "assistant", json.dumps(response_content))
-    return response_content
+    logger.info(f"Session {session_id}: Response returned successfully.")
 
+    return response_content
