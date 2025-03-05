@@ -14,7 +14,6 @@ import logging
 from fastapi import FastAPI, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-
 import db_utils
 from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query, execute_and_report_helper, execute_and_report_with_db_helper
 
@@ -58,7 +57,7 @@ class FullRequest(BaseModel):
         message (str): The natural language query input.
     """
     message: str
-
+      
 class RequestForDatabase(BaseModel):
     session_id: str
     message: str
@@ -177,7 +176,6 @@ def execute_and_report(request: FullRequest =
     results = execute_and_report_helper(message)
 
     return results
-
 @app.post("/execute-and-report-with-db")
 def execute_and_report_with_db(request: RequestForDatabase =
                          Body(..., title="Combined_Request")):
