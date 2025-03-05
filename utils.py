@@ -20,12 +20,26 @@ Author: Recep Borekci
 Date:  18/02/2025  
 """
 import os
+import re
 import json
 import sqlite3
 import logging
 from openai import OpenAI
 from dotenv import load_dotenv
 from system_messages import SYSTEM_MESSAGE, SYSTEM_MESSAGE_IMPROVED
+
+import db_utils
+
+# Configure the logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("app.log"),  # Logs to a file
+        logging.StreamHandler()  # Also logs to the console
+    ]
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -79,6 +93,8 @@ def execute_sql_query(query: str, structured: bool = False):
         conn = sqlite3.connect("data.db")
         cursor = conn.cursor()
 
+        logger.info(f"Executing SQL query: {query}")  # ✅ Log query execution
+
         cursor.execute(query)
 
         # Fetch column names
@@ -95,17 +111,40 @@ def execute_sql_query(query: str, structured: bool = False):
             for row in rows:
                 for i, column in enumerate(columns):
                     result[column].append(str(row[i]))  # Ensure all values are strings
+            logger.info(f"Query executed successfully. {len(rows)} rows returned.")
             return result
         else:
+            logger.info(f"Query executed successfully. {len(rows)} rows returned.")
             # Return as a list of tuples
             return rows
 
     except sqlite3.Error as e:
-        logging.error(f"Database error: {e}")
+        logger.error(f"Database error: {e}")  # ✅ Log errors properly
         return f"SQL Error: {str(e)}"
 
     finally:
         conn.close()
+
+def is_read_only_query(query: str) -> bool:
+    """
+    Checks if the given SQL query is read-only.
+
+    Args:
+        query (str): The SQL query to validate.
+
+    Returns:
+        bool: True if the query is read-only, False otherwise.
+    """
+    # Convert to lowercase for case-insensitive checks
+    query = query.strip().lower()
+
+    # Reject queries that contain any DML operations (INSERT, UPDATE, DELETE, DROP, ALTER, etc.)
+    forbidden_keywords = ["insert", "update", "delete", "drop", "alter", "truncate"]
+    
+    # Use regex to find if any forbidden keyword is the first word (excluding comments)
+    pattern = r"^\s*(?:--.*\n)*\s*\b(" + "|".join(forbidden_keywords) + r")\b"
+
+    return not re.search(pattern, query)
 
 def handle_tool_call(message):
     """
@@ -122,6 +161,16 @@ def handle_tool_call(message):
     if tool_call.function.name == "run_sql_query":
         arguments = json.loads(tool_call.function.arguments)
         query = arguments.get("query")
+
+        # Check if the query is read-only
+        if not is_read_only_query(query):
+            logging.warning(f"Blocked non-read query: {query}")
+            return {
+                "role": "tool",
+                "content": json.dumps({"error": "Unauthorized operation: Only read-only queries are allowed."}),
+                "tool_call_id": tool_call.id,
+            }
+
         results = execute_sql_query(query)
 
         # Ensure results are in a structured format
@@ -198,6 +247,9 @@ def execute_and_report_helper(message) -> str:
     """
 
     messages = [{"role": "system", "content": SYSTEM_MESSAGE_IMPROVED}, {"role": "user", "content": message}]
+
+    logger.info(f"Processing user message: {message}")
+
     # Step 1: Ask LLM to generate an SQL query if needed
     response = openai.chat.completions.create(
         model=MODEL,
@@ -205,6 +257,10 @@ def execute_and_report_helper(message) -> str:
         tools=tools,  # Let the LLM know it can use the SQL tool
         tool_choice="auto",  # Automatically decide when to call the tool
     )
+
+    if not response.choices or not response.choices[0].message.content:
+        logger.warning("LLM returned an empty response.")
+        return {"error": "LLM returned no response"}
 
     if response.choices[0].finish_reason == "tool_calls":  # If the LLM wants to call a tool (SQL query execution)
         tool_message = response.choices[0].message
@@ -223,6 +279,110 @@ def execute_and_report_helper(message) -> str:
         final_content = final_response.choices[0].message.content
         return json.loads(final_content)  # Return as a parsed dictionary
     
-    # If no SQL tool call, return the original LLM response wrapped in a dictionary
-    response_content = response.choices[0].message.content
-    return json.loads(response_content)
+    response_content = json.loads(response.choices[0].message.content)
+
+    logger.info("LLM successfully processed the message.")
+    return response_content
+
+def clean_response(response_dict):
+    """Removes keys with None, empty strings, or empty dictionaries from a response."""
+    return {k: v for k, v in response_dict.items() if v not in [None, "", {}]}
+
+def execute_and_report_with_db_helper(message, session_id) -> dict:
+    """
+    Processes a user's input message that may require SQL execution. This function generates 
+    an SQL query using the language model (if needed), executes the query, and returns a final report. 
+    If no SQL query is needed, the original response from the language model is returned without 
+    any SQL query execution.
+
+    Args:
+        message (str): The user's input message that may involve data retrieval from the database.
+        session_id (str): The session identifier for storing and retrieving conversation history.
+
+    Returns:
+        dict: The final response from the language model, possibly including SQL query results.
+    """
+
+    logger.info(f"Session {session_id}: Received message -> {message}")
+
+    # Initialize the database
+    db_utils.init_db()
+    logger.info(f"Session {session_id}: Database initialized.")
+
+    # Retrieve conversation history
+    conversation = db_utils.get_conversation(session_id) or []
+    
+    if not conversation:
+        logger.info(f"Session {session_id}: No previous conversation found. Initializing session.")
+        db_utils.insert_message(session_id, "system", SYSTEM_MESSAGE_IMPROVED)
+        conversation.append({"role": "system", "content": SYSTEM_MESSAGE_IMPROVED})
+
+    # Add user message to conversation
+    messages = conversation + [{"role": "user", "content": message}]
+    db_utils.insert_message(session_id, "user", message)
+    logger.info(f"Session {session_id}: User message stored in DB.")
+
+    # Step 1: Ask LLM to generate an SQL query if needed
+    try:
+        response = openai.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+        )
+    except Exception as e:
+        logger.error(f"Session {session_id}: Error calling LLM - {e}")
+        return {"error": "LLM request failed."}
+
+    if not response.choices or not response.choices[0].message.content:
+        logger.warning(f"Session {session_id}: LLM returned no response.")
+        error_response = {"error": "LLM returned no response"}
+        db_utils.insert_message(session_id, "assistant", json.dumps(error_response))
+        return error_response
+
+    response_content = json.loads(response.choices[0].message.content)
+
+    # Step 2: Handle tool calls (SQL queries)
+    if response.choices[0].finish_reason == "tool_calls":
+        logger.info(f"Session {session_id}: LLM requested a tool call (SQL execution).")
+
+        tool_message = response.choices[0].message
+        db_utils.insert_message(session_id, "assistant", json.dumps(tool_message))
+
+        structured_tool_response = handle_tool_call(tool_message)  # Execute SQL query
+
+        if "error" in structured_tool_response:
+            logger.error(f"Session {session_id}: Error executing SQL query - {structured_tool_response['error']}")
+
+        # Insert tool execution result
+        db_utils.insert_message(session_id, "tool", json.dumps(structured_tool_response))
+
+        # Step 3: Send SQL results back to LLM for final response
+        messages.extend([tool_message, structured_tool_response])
+
+        try:
+            final_response = openai.chat.completions.create(model=MODEL, messages=messages)
+        except Exception as e:
+            logger.error(f"Session {session_id}: Error generating final report from LLM - {e}")
+            return {"error": "LLM failed to generate final report."}
+
+        if not final_response.choices or not final_response.choices[0].message.content:
+            logger.warning(f"Session {session_id}: LLM returned no final response.")
+            error_response = {"error": "LLM returned no final response"}
+            db_utils.insert_message(session_id, "assistant", json.dumps(error_response))
+            return error_response
+
+        final_content = json.loads(final_response.choices[0].message.content)
+        final_content = clean_response(final_content)
+
+        db_utils.insert_message(session_id, "assistant", json.dumps(final_content))
+        logger.info(f"Session {session_id}: Final response stored in DB.")
+
+        return final_content
+
+    # ✅ Clean response before returning
+    response_content = clean_response(response_content)
+    db_utils.insert_message(session_id, "assistant", json.dumps(response_content))
+    logger.info(f"Session {session_id}: Response returned successfully.")
+
+    return response_content
