@@ -258,9 +258,11 @@ def execute_and_report_helper(message) -> str:
         tool_choice="auto",  # Automatically decide when to call the tool
     )
 
+
     if not response.choices or not response.choices[0].message.content:
-        logger.warning("LLM returned an empty response.")
-        return {"error": "LLM returned no response"}
+        logger.warning("LLM returned no response.")
+        error_response = {"error": "LLM returned no response"}
+        return error_response
 
     if response.choices[0].finish_reason == "tool_calls":  # If the LLM wants to call a tool (SQL query execution)
         tool_message = response.choices[0].message
