@@ -15,7 +15,7 @@ from fastapi import FastAPI, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import db_utils
-from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query, execute_and_report_helper, execute_and_report_with_db_helper
+from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query, execute_and_report_helper, execute_and_report_helper_2, execute_and_report_with_db_helper
 
 class NLQRequest(BaseModel):
     """
@@ -192,6 +192,36 @@ def execute_and_report(request: FullRequest =
     results = execute_and_report_helper(message)
 
     return results
+
+@app.post("/execute-and-report-2")
+def execute_and_report_2(request: FullRequest =
+                         Body(..., title="Combined_Request")):
+    """
+    Processes a user's natural language query by converting it into an SQL query,  
+    executing the query, and returning the results in a structured format.  
+    If the query involves a tool call (e.g., SQL execution), the tool will be invoked and the results will be included in the response.
+
+    Args:
+        request (FullRequest): The request body containing the user's message with the natural language query.
+
+    Returns:
+        dict: A structured JSON response containing the results of the SQL execution or failure message,  
+              depending on the query's nature and execution success.
+
+    Raises:
+        HTTPException: If the input message is empty or exceeds 5000 characters.
+    """
+
+    message = request.message
+
+    validation_error = validate_input(message)
+    if validation_error:
+        return validation_error
+
+    results = execute_and_report_helper_2(message)
+
+    return results
+
 @app.post("/execute-and-report-with-db")
 def execute_and_report_with_db(request: RequestForDatabase =
                          Body(..., title="Combined_Request")):
