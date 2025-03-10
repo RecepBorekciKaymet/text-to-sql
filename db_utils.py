@@ -2,7 +2,7 @@ import sqlite3
 from typing import List, Dict
 
 # Database file containing conversation history.
-DB_FILE = "messages.db"
+DB_FILE = "message_history.db"
 
 
 def init_db() -> None:
