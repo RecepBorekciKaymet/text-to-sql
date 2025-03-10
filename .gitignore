@@ -172,3 +172,4 @@ cython_debug/
 
 # Database
 messages.db
+message_history.db
