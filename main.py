@@ -17,6 +17,7 @@ from pydantic import BaseModel
 import db_utils
 from utils import convert_nlp_to_sql, execute_sql_query, generate_and_run_sql_query, execute_and_report_helper, execute_and_report_with_db_helper
 
+
 class NLQRequest(BaseModel):
     """
     Represents a request containing a natural language query (NLQ)  
@@ -163,7 +164,7 @@ def generate_and_run_sql(request: CombinedRequest =
     sql_query = generate_and_run_sql_query(text)
 
     return {"sql_query": sql_query }
- 
+
 @app.post("/execute-and-report")
 def execute_and_report(request: FullRequest =
                          Body(..., title="Combined_Request")):
@@ -192,6 +193,7 @@ def execute_and_report(request: FullRequest =
     results = execute_and_report_helper(message)
 
     return results
+
 @app.post("/execute-and-report-with-db")
 def execute_and_report_with_db(request: RequestForDatabase =
                          Body(..., title="Combined_Request")):
