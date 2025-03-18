@@ -3,7 +3,7 @@ Module for converting natural language queries (NLQ) into SQL queries
 and executing SQL queries against a SQLite database.
 
 This module provides:
-1. A function (`convert_nlp_to_sql`) that uses OpenAI's GPT model to generate SQL queries from NLQ input.
+1. A function (`convert_nlq_to_sql`) that uses OpenAI's GPT model to generate SQL queries from NLQ input.
 2. A function (`execute_sql_query`) that executes SQL queries against a local SQLite database.
 3. A function (`generate_and_run_sql_query`) that converts a NLQ to SQL and optionally executes it.
 4. A function (`execute_and_report_helper`) that processes user input, generates and executes SQL queries, and returns a final response from the language model.
@@ -47,7 +47,7 @@ openai_api_key = os.getenv('OPENAI_API_KEY')
 openai = OpenAI(api_key=openai_api_key)
 MODEL = 'gpt-4o'
 
-def convert_nlp_to_sql(query: str) -> str:
+def convert_nlq_to_sql(query: str) -> str:
     """
     Converts a natural language query into an SQL query using OpenAI's GPT model.
 
@@ -305,7 +305,7 @@ def execute_and_report_helper(message) -> dict:
     """
     Processes a user's message that can either be an SQL-related NLQ or a general conversation query.
     It follows these steps:
-      1. Converts the NLQ to an SQL query using convert_nlp_to_sql.
+      1. Converts the NLQ to an SQL query using convert_nlq_to_sql.
       2. Checks whether the generated SQL contains "SELECT" (i.e. appears to be a valid SQL query).
          - If it does, the query is executed with execute_sql_query and a final report is generated via Nova,
            returning a dictionary with keys "sql_query", "results", and "final_report".
@@ -328,7 +328,7 @@ def execute_and_report_helper(message) -> dict:
               }
     """
     # Step 1: Convert NLQ to SQL query
-    sql_query = convert_nlp_to_sql(message)
+    sql_query = convert_nlq_to_sql(message)
     logger.info(f"Generated SQL query: {sql_query}")
 
     # If the response doesn't contain "SELECT", assume it's a non-NLQ chat
@@ -359,7 +359,7 @@ def clean_response(response_dict):
     """Removes keys with None, empty strings, or empty dictionaries from a response."""
     return {k: v for k, v in response_dict.items() if v not in [None, "", {}]}
 
-def execute_and_report_helper_db(message, session_id) -> dict:
+def execute_and_report_with_db_helper(message, session_id) -> dict:
     """
     Processes a user's message with conversation history stored in the database.
     It distinguishes between SQL-related NLQs and general chat queries:
@@ -407,7 +407,7 @@ def execute_and_report_helper_db(message, session_id) -> dict:
     logger.info(f"Session {session_id}: User message stored in DB.")
 
     # Step 1: Convert NLQ to SQL query
-    sql_query = convert_nlp_to_sql(message)
+    sql_query = convert_nlq_to_sql(message)
     logger.info(f"Session {session_id}: Generated SQL query: {sql_query}")
 
     # If the query is not SQL, handle chat response
@@ -432,4 +432,92 @@ def execute_and_report_helper_db(message, session_id) -> dict:
         # Step 3: Generate the final report using the new method
         return generate_report(message, sql_query, sql_results, conversation, session_id)
 
+def sanitize_sql_query(sql_query: str) -> str:
+    """Remove trailing semicolon from an SQL query if present."""
+    return sql_query.rstrip(";")
 
+def quick_check_sql_query(sql_query: str) -> bool:
+    """
+    Checks if the given SQL query returns data by wrapping it in a SELECT EXISTS query.
+    """
+    sql_query = sanitize_sql_query(sql_query)
+    select_exists_query = f"SELECT EXISTS ({sql_query})"
+    is_exists = execute_sql_query(select_exists_query)
+
+    # print(type(is_exists)) # List 
+    # print(type(is_exists[0])) # Tuple 
+    # print(type(is_exists[0][0])) # Int
+
+    # Expecting a list of tuples, extract first value
+    if is_exists and isinstance(is_exists, list) and isinstance(is_exists[0], tuple):
+        return is_exists[0][0]
+    return False
+
+    
+
+quick_check_sql_tool = {
+    "type": "function",
+    "name": "quick_check_sql_query",
+    "description": "Checks if a given SQL query returns data by wrapping it in a SELECT EXISTS statement. This function returns 0 or 1.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "sql_query": {
+                "type": "string",
+                "description": "The SQL query to check for data existence. Ensure it is a valid SELECT statement.",
+            }
+        },
+        "required": ["sql_query"],
+        "additionalProperties": False
+    }
+}
+
+sql_check_tools = [quick_check_sql_tool]
+
+def quick_check_sql(nlq_query: str) -> str:
+    """
+    Given a natural language query, this function converts it into SQL, checks for data existence,
+    and then either executes the query (if data exists) or returns an informative message.
+    
+    It uses OpenAI tool calling to simulate the data existence check.
+    """
+    # Step 1: Convert NLQ to SQL query.
+    sql_query = convert_nlq_to_sql(nlq_query)
+    
+    # Step 2: Use tool calling to get the SQL query for existence check.
+    input_messages = [{"role": "user", "content": sql_query}]
+    response = openai.responses.create(
+        model=MODEL,
+        input=input_messages,
+        tools=sql_check_tools
+    )
+    
+    tool_call = response.output[0]
+    args = json.loads(tool_call.arguments)
+    
+    # Step 3: Run quick_check_sql_query to determine if data exists.
+    exists = quick_check_sql_query(args["sql_query"])
+    
+    # Append tool call and its output to the conversation.
+    input_messages.append(tool_call)
+    input_messages.append({
+        "type": "function_call_output",
+        "call_id": tool_call.call_id,
+        "output": str(exists)
+    })
+    
+    # Step 4: Based on the check, either execute the original SQL query or return a message.
+    if exists:
+        sql_results = execute_sql_query(sql_query)
+        final_message = f"The query returns data. Here are the results: {sql_results}"
+    else:
+        final_message = "The query does not return any results. It seems there is no data matching the criteria."
+    
+    # Optionally, pass the final message through a second tool call to format the output.
+    response2 = openai.responses.create(
+        model=MODEL,
+        input=input_messages + [{"role": "user", "content": final_message}],
+        tools=sql_check_tools
+    )
+    
+    return response2.output_text
