@@ -18,6 +18,7 @@ import db_utils
 from utils import convert_nlq_to_sql, execute_sql_query, generate_and_run_sql_query, execute_and_report_helper, execute_and_report_with_db_helper, quick_check_sql
 
 
+
 class NLQRequest(BaseModel):
     """
     Represents a request containing a natural language query (NLQ)  
